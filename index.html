@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E-Book Text Enhancer</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #fff9e6;
+      color: #333;
+      padding: 2rem;
+    }
+    h1 {
+      color: #d4af37;
+    }
+    input[type="file"] {
+      margin-bottom: 1rem;
+      display: block;
+    }
+    button {
+      background-color: #ffd700;
+      border: none;
+      padding: 10px 20px;
+      cursor: pointer;
+      border-radius: 5px;
+      font-weight: bold;
+    }
+    #outputEpub {
+      white-space: pre-wrap;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>E-Book Text Enhancer</h1>
+  <input type="file" id="fileInputEpub" accept=".epub,.kfx" multiple><br>
+  <div>
+    <button onclick="processEbooks()">Process E-Book Files</button>
+    <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+      Note: KFX files require conversion to EPUB first. We recommend using Calibre with 
+      <a href="https://www.mobileread.com/forums/showthread.php?t=291290" target="_blank">KFX Input plugin</a> 
+      to convert KFX to EPUB before processing.
+    </div>
+  </div>
+  <div id="outputEpub"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script>
+    function boldifyTextNodes(node) {
+      const XHTML_NS = "http://www.w3.org/1999/xhtml";
+      if (node.nodeType === Node.TEXT_NODE) {
+        const words = node.nodeValue.split(/(\s+)/);
+        const newFragment = document.createDocumentFragment();
+
+        words.forEach(word => {
+          if (/\w+/.test(word)) {
+            const boldLen = Math.ceil(word.length / 2);
+            const bElem = document.createElementNS(XHTML_NS, "b");
+            bElem.textContent = word.slice(0, boldLen);
+            newFragment.appendChild(bElem);
+            newFragment.appendChild(document.createTextNode(word.slice(boldLen)));
+          } else {
+            newFragment.appendChild(document.createTextNode(word));
+          }
+        });
+
+        node.replaceWith(newFragment);
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        Array.from(node.childNodes).forEach(child => boldifyTextNodes(child));
+      }
+    }
+
+    function getFileExtension(filename) {
+      return filename.slice((filename.lastIndexOf(".") - 1 >>> 0) + 2).toLowerCase();
+    }
+
+    async function processEbooks() {
+      const input = document.getElementById('fileInputEpub');
+      const files = input.files;
+      const output = document.getElementById('outputEpub');
+      output.innerHTML = '';
+
+      for (let file of files) {
+        try {
+          const fileExtension = getFileExtension(file.name);
+          
+          if (fileExtension === 'epub') {
+            await processEPUB(file, output);
+          } else if (fileExtension === 'kfx') {
+            const msg = document.createElement('div');
+            msg.innerHTML = `<p style="color: orange;">KFX files are not directly supported due to their proprietary format.</p>
+                            <p>Please convert "${file.name}" to EPUB format first using Calibre with the 
+                            <a href="https://www.mobileread.com/forums/showthread.php?t=291290" target="_blank">KFX Input plugin</a>.</p>`;
+            output.appendChild(msg);
+          } else {
+            throw new Error('Unsupported file format');
+          }
+        } catch (err) {
+          console.error('Error processing file:', err);
+          const msg = document.createElement('div');
+          msg.textContent = `Failed to process ${file.name}: ${err.message}`;
+          msg.style.color = 'red';
+          output.appendChild(msg);
+        }
+      }
+    }
+
+    async function processEPUB(file, output) {
+      const zip = await JSZip.loadAsync(file);
+      const newZip = new JSZip();
+
+      for (const fileName of Object.keys(zip.files)) {
+        const fileObj = zip.files[fileName];
+
+        if (fileName.endsWith(".xhtml") || fileName.endsWith(".html")) {
+          const content = await fileObj.async("text");
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(content, "application/xhtml+xml");
+
+          const body = doc.querySelector('body');
+          if (body) {
+            boldifyTextNodes(body);
+            const serializer = new XMLSerializer();
+            const serialized = serializer.serializeToString(doc);
+            newZip.file(fileName, serialized);
+          } else {
+            newZip.file(fileName, content);
+          }
+        } else {
+          newZip.file(fileName, await fileObj.async("arraybuffer"));
+        }
+      }
+
+      const blob = await newZip.generateAsync({ type: "blob" });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = file.name.replace('.epub', '_bold.epub');
+      a.textContent = 'Download ' + a.download;
+      output.appendChild(a);
+      output.appendChild(document.createElement('br'));
+    }
+  </script>
+</body>
+</html>
